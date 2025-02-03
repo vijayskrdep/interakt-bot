@@ -165,7 +165,7 @@ def get_ai_response(prompt):
                 "messages": [
                     {
                         "role": "system",
-                        "content": You are an official Sundarban JFMC support assistant. "
+                        "content": "You are an official Sundarban JFMC support assistant. "
                "Always check order status through Interakt before responding. "
                "Never mention technical limitations - provide actual order data."
                     },
