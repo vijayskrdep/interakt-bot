@@ -7,23 +7,23 @@ from flask import Flask, request, jsonify
 # =============================================
 INTERAKT_API_KEY = os.getenv("INTERAKT_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-PORT = int(os.getenv("PORT", 5000))  # Default to 5000 if not set
+PORT = int(os.getenv("PORT", 10000))  # Default to 10000 if Render assigns it
 # =============================================
 
 app = Flask(__name__)
 
 def get_product_catalog():
-    """Fetch product catalog from Interakt (Standard or Facebook-linked catalog)"""
+    """Fetch product catalog from Interakt"""
     try:
         response = requests.get(
-            "https://api.interakt.ai/v1/public/facebook/catalogs",  # ✅ Updated API for Facebook catalog
+            "https://api.interakt.ai/v1/public/facebook/catalogs",
             headers={
                 "Authorization": f"Basic {INTERAKT_API_KEY}",
                 "Content-Type": "application/json"
             }
         )
 
-        print(f"\n📡 Interakt API Response: {response.status_code} - {response.text}")  # ✅ Debugging response
+        print(f"\n📡 Interakt API Response: {response.status_code} - {response.text}")
 
         if response.status_code == 200:
             catalog_items = response.json().get("data", [])
@@ -43,7 +43,7 @@ def get_product_catalog():
         return "⚠️ Error retrieving product catalog."
 
 def get_ai_response(prompt):
-    """Get response from OpenAI with memory for better conversation handling."""
+    """Get AI-generated response with contextual memory"""
     try:
         response = requests.post(
             "https://api.openai.com/v1/chat/completions",
@@ -83,16 +83,10 @@ def handle_interakt_webhook():
         import json
         print("\n📥 Incoming Webhook JSON (Raw):\n", json.dumps(data, indent=4))
 
-        if not data:
-            print("❌ Received empty JSON")
-            return jsonify({"status": "error", "message": "Empty request"}), 400
-
-        if "type" not in data or "data" not in data:
-            print("❌ Invalid JSON format")
+        if not data or "type" not in data or "data" not in data:
             return jsonify({"status": "error", "message": "Invalid JSON format"}), 400
 
         if data.get("type") != "message_received":
-            print("⚠️ Ignoring non-message events...")
             return jsonify({"status": "ignored", "message": "Non-message event ignored"}), 200
 
         customer_data = data.get("data", {}).get("customer", {})
@@ -103,7 +97,6 @@ def handle_interakt_webhook():
         print(f"📩 Received Message: {message_text} from {phone_number}")
 
         if not phone_number or not message_text:
-            print("❌ Missing phone number or message")
             return jsonify({"status": "error", "message": "Missing phone number or message"}), 400
 
         if "product" in message_text or "catalog" in message_text or "list" in message_text:
@@ -113,15 +106,17 @@ def handle_interakt_webhook():
             if len(order_details) >= 3:
                 product_name = order_details[1]
                 quantity = order_details[2]
-                ai_response = process_payment(phone_number, product_name, quantity)
+                cart_id = data.get("data", {}).get("cart_id")
+                if not cart_id:
+                    ai_response = "⚠️ Order not found. Please try again."
+                else:
+                    ai_response = process_payment(phone_number, cart_id)
             else:
                 ai_response = "⚠️ Invalid format. Please use: *Order [Product Name] [Quantity]*"
         elif message_text == "paid":
             ai_response = "✅ Payment received! Your order is confirmed and will be processed shortly."
         else:
             ai_response = get_ai_response(message_text)
-
-        print(f"🤖 AI Response: {ai_response}")
 
         response = requests.post(
             "https://api.interakt.ai/v1/public/message/",
@@ -144,93 +139,40 @@ def handle_interakt_webhook():
         print(f"🔥 Critical error: {str(e)}", flush=True)
         return jsonify({"status": "error", "message": f"Internal server error: {str(e)}"}), 500
 
-
-def process_payment(phone_number, product_name, quantity):
-    """Generate a Razorpay payment link and send it to the customer"""
+def process_payment(phone_number, cart_id):
+    """Request payment link from Interakt and send it to the customer"""
     try:
-        amount = 50000  # Replace with actual product price (in paise, ₹500 = 50000)
         payload = {
-            "amount": amount,
-            "currency": "INR",
-            "accept_partial": False,
-            "first_min_partial_amount": amount,
-            "description": f"Order for {product_name} (x{quantity})",
-            "customer": {"contact": phone_number},
-            "notify": {"sms": False, "email": False, "whatsapp": True},
-            "callback_url": "https://sundarbanjfmc.org/payment-success",
-            "callback_method": "get"
+            "cart_id": cart_id,
+            "payment_mode": "razorpay"
         }
 
-        auth = (os.getenv("RAZORPAY_KEY_ID"), os.getenv("RAZORPAY_KEY_SECRET"))
-        response = requests.post("https://api.razorpay.com/v1/payment_links", auth=auth, json=payload)
+        response = requests.post(
+            "https://api.interakt.ai/v1/public/cart/payment_link",
+            headers={
+                "Authorization": f"Basic {INTERAKT_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json=payload
+        )
+
+        print(f"📡 Interakt Payment API Response: {response.status_code} - {response.text}")
 
         if response.status_code == 200:
             payment_data = response.json()
-            payment_link = payment_data["short_url"]
+            payment_link = payment_data.get("payment_link")
+
             return (
-                f"🛒 *Order Summary:*\n"
-                f"📦 Product: {product_name}\n"
-                f"🔢 Quantity: {quantity}\n"
-                f"💰 Total Price: ₹{amount/100}\n"
-                f"✅ Complete your payment here: {payment_link}\n"
+                f"🛒 *Payment Link Generated!*\n"
+                f"💰 Please complete your payment here: {payment_link}\n"
                 f"Once you've completed the payment, reply *'Paid'* to confirm."
             )
         else:
-            return f"⚠️ Payment processing failed. Error: {response.text}"
+            return f"⚠️ Failed to generate payment link. Error: {response.text}"
     except Exception as e:
-        print(f"🔥 Razorpay Payment Error: {str(e)}")
+        print(f"🔥 Interakt Payment Error: {str(e)}", flush=True)
         return "⚠️ Error processing payment."
 
-@app.route('/webhook/razorpay', methods=['POST'])
-def razorpay_webhook():
-    """Handle Razorpay Webhook for Payment Confirmation"""
-    try:
-        data = request.get_json()
-        print(f"\n📥 Razorpay Webhook Received:\n{data}")
-
-        event_type = data.get("event")
-        if event_type == "payment_link.paid":
-            payment_info = data.get("payload", {}).get("payment_link", {}).get("entity", {})
-            phone_number = payment_info.get("customer", {}).get("contact", "")
-            amount_paid = payment_info.get("amount_paid", 0) / 100
-            order_id = payment_info.get("id")
-
-            ai_response = (
-                f"✅ Payment of ₹{amount_paid} received!\n"
-                f"Your order (ID: {order_id}) is confirmed and will be processed shortly.\n"
-                f"Thank you for shopping with Sundarban JFMC! 🐝🍯"
-            )
-
-            response = requests.post(
-                "https://api.interakt.ai/v1/public/message/",
-                headers={
-                    "Authorization": f"Basic {INTERAKT_API_KEY}",
-                    "Content-Type": "application/json"
-                },
-                json={
-                    "fullPhoneNumber": phone_number,
-                    "type": "Text",
-                    "data": {"message": ai_response}
-                }
-            )
-
-            print("✅ Payment Confirmation Sent to Customer")
-            return jsonify({"status": "success", "message": "Payment confirmed"}), 200
-        elif event_type == "payment_link.expired":
-            print("⚠️ Payment link expired, no action needed.")
-            return jsonify({"status": "ignored", "message": "Payment link expired"}), 200
-        else:
-            print("⚠️ Unhandled Razorpay Event")
-            return jsonify({"status": "ignored", "message": "Unhandled event"}), 400
-    except Exception as e:
-        print(f"🔥 Razorpay Webhook Error: {str(e)}")
-        return jsonify({"status": "error", "message": "Webhook processing failed"}), 500
-
-
-
 if __name__ == '__main__':
-    import os
-    PORT = int(os.getenv("PORT", 10000))  # Default to 10000 if Render assigns it
     print(f"\n🚀 Starting WhatsApp AI Assistant on port {PORT}...")
     app.run(host='0.0.0.0', port=PORT)
-
