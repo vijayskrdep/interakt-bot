@@ -80,7 +80,16 @@ def handle_interakt_webhook():
     """Handle incoming messages from Interakt"""
     try:
         data = request.get_json()
+        import json
         print("\n📥 Incoming Webhook JSON (Raw):\n", json.dumps(data, indent=4))
+
+        if not data:
+            print("❌ Received empty JSON")
+            return jsonify({"status": "error", "message": "Empty request"}), 400
+
+        if "type" not in data or "data" not in data:
+            print("❌ Invalid JSON format")
+            return jsonify({"status": "error", "message": "Invalid JSON format"}), 400
 
         if data.get("type") != "message_received":
             print("⚠️ Ignoring non-message events...")
@@ -89,9 +98,13 @@ def handle_interakt_webhook():
         customer_data = data.get("data", {}).get("customer", {})
         phone_number = customer_data.get("country_code", "") + customer_data.get("phone_number", "")
         message_data = data.get("data", {}).get("message", {})
-        message_text = message_data.get("message").strip().lower()
+        message_text = message_data.get("message", "").strip().lower()
 
         print(f"📩 Received Message: {message_text} from {phone_number}")
+
+        if not phone_number or not message_text:
+            print("❌ Missing phone number or message")
+            return jsonify({"status": "error", "message": "Missing phone number or message"}), 400
 
         if "product" in message_text or "catalog" in message_text or "list" in message_text:
             ai_response = get_product_catalog()
@@ -104,10 +117,7 @@ def handle_interakt_webhook():
             else:
                 ai_response = "⚠️ Invalid format. Please use: *Order [Product Name] [Quantity]*"
         elif message_text == "paid":
-            ai_response = (
-                "✅ Payment received! Your order is confirmed and will be processed shortly.\n"
-                "Thank you for shopping with Sundarban JFMC! 🐝🍯"
-            )
+            ai_response = "✅ Payment received! Your order is confirmed and will be processed shortly."
         else:
             ai_response = get_ai_response(message_text)
 
@@ -131,8 +141,8 @@ def handle_interakt_webhook():
         return jsonify({"status": "success", "message": "Message sent"}), 200
 
     except Exception as e:
-        print(f"🔥 Critical error: {str(e)}")
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
+        print(f"🔥 Critical error: {str(e)}", flush=True)
+        return jsonify({"status": "error", "message": f"Internal server error: {str(e)}"}), 500
 
 
 def process_payment(phone_number, product_name, quantity):
