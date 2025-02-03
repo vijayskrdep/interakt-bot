@@ -119,5 +119,8 @@ def handle_interakt_webhook():
         return jsonify({"status": "error", "message": "Internal server error"}), 500
 
 if __name__ == '__main__':
-    print("\n🚀 Starting WhatsApp AI Assistant...")
+    import os
+    PORT = int(os.getenv("PORT", 10000))  # Default to 10000 if Render assigns it
+    print(f"\n🚀 Starting WhatsApp AI Assistant on port {PORT}...")
     app.run(host='0.0.0.0', port=PORT)
+
