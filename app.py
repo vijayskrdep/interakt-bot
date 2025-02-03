@@ -101,20 +101,27 @@ def handle_interakt_webhook():
 
         if "product" in message_text or "catalog" in message_text or "list" in message_text:
             ai_response = get_product_catalog()
+        
         elif message_text.startswith("order "):
+            # Extract order details
             order_details = message_text.split(" ")
             if len(order_details) >= 3:
                 product_name = order_details[1]
                 quantity = order_details[2]
-                cart_id = data.get("data", {}).get("cart_id")
-                if not cart_id:
-                    ai_response = "⚠️ Order not found. Please try again."
-                else:
+
+                # 🔥 Fetch cart order ID from Interakt API
+                cart_id = fetch_cart_id(phone_number)
+                
+                if cart_id:
                     ai_response = process_payment(phone_number, cart_id)
+                else:
+                    ai_response = "⚠️ Order not found. Please add items to cart first."
             else:
                 ai_response = "⚠️ Invalid format. Please use: *Order [Product Name] [Quantity]*"
+        
         elif message_text == "paid":
             ai_response = "✅ Payment received! Your order is confirmed and will be processed shortly."
+        
         else:
             ai_response = get_ai_response(message_text)
 
@@ -139,8 +146,35 @@ def handle_interakt_webhook():
         print(f"🔥 Critical error: {str(e)}", flush=True)
         return jsonify({"status": "error", "message": f"Internal server error: {str(e)}"}), 500
 
+def fetch_cart_id(phone_number):
+    """Fetch latest cart ID for a customer from Interakt"""
+    try:
+        response = requests.get(
+            "https://api.interakt.ai/v1/public/cart/orders",
+            headers={
+                "Authorization": f"Basic {INTERAKT_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            params={"phone_number": phone_number}
+        )
+
+        print(f"📡 Interakt Cart API Response: {response.status_code} - {response.text}")
+
+        if response.status_code == 200:
+            cart_orders = response.json().get("data", [])
+            if cart_orders:
+                latest_cart = cart_orders[-1]  # Get the most recent cart order
+                return latest_cart.get("id")
+            else:
+                return None
+        else:
+            return None
+    except Exception as e:
+        print(f"🔥 Error fetching cart ID: {str(e)}")
+        return None
+
 def process_payment(phone_number, cart_id):
-    """Request payment link from Interakt and send it to the customer"""
+    """Generate payment link using Interakt and send to the customer"""
     try:
         payload = {
             "cart_id": cart_id,
