@@ -97,41 +97,60 @@ def get_product_catalog():
         return "⚠️ Error retrieving product catalog."
 
 def get_order_status(phone_number):
-    """Fetch the latest order status from Interakt"""
+    """Fetch the latest order status from Interakt PROPERLY"""
     try:
+        # Use the CORRECT API endpoint for order tracking
         response = requests.get(
-            "https://api.interakt.ai/v1/public/cart/orders",
+            "https://api.interakt.ai/v1/public/track/orders",  # Updated endpoint
             headers={
-                "Authorization": f"Basic {INTERAKT_API_KEY}",
+                "Authorization": f"Bearer {INTERAKT_API_KEY}",  # Changed to Bearer token
                 "Content-Type": "application/json"
             },
-            params={"phone_number": phone_number}
+            params={
+                "customerPhone": phone_number,  # Correct parameter name
+                "sort": "-created_at"  # Get latest order first
+            }
         )
 
         print(f"📡 Interakt Order API Response: {response.status_code} - {response.text}")
 
         if response.status_code == 200:
-            orders = response.json().get("data", [])
-            if orders:
-                latest_order = orders[-1]
-                order_id = latest_order.get("id")
-                order_status = latest_order.get("order_status", "Unknown")
-                tracking_link = latest_order.get("tracking_link", "No tracking link available.")
+            orders = response.json().get("items", [])  # Correct response structure
+            
+            if not orders:
+                return "📭 No active orders found for this number. Please contact support if you believe this is an error."
 
-                return (
-                    f"📦 *Order Update:*\n"
-                    f"🚚 Current Status: {order_status}\n"
-                    f"🛒 Order ID: {order_id}\n"
-                    f"🔗 Track your order: {tracking_link}"
-                )
-            else:
-                return "⚠️ No orders found under this phone number."
-        else:
-            return f"⚠️ Unable to fetch order details. API Error: {response.status_code}"
+            latest_order = orders[0]  # Now properly sorted
+            order_id = latest_order.get("orderId", "N/A")
+            status = latest_order.get("currentStatus", {}).get("status", "Unknown")
+            tracking_url = latest_order.get("trackingUrl", "")
+            
+            status_map = {
+                "CONFIRMED": "📦 Order Confirmed",
+                "PROCESSING": "⚙️ Processing",
+                "SHIPPED": "🚚 Shipped",
+                "OUT_FOR_DELIVERY": "📦 Out for Delivery",
+                "DELIVERED": "🎉 Delivered",
+                "CANCELLED": "❌ Cancelled"
+            }
+            
+            status_text = status_map.get(status, f"🔄 Status: {status}")
+            message = (
+                f"📦 *Order #{order_id}*\n"
+                f"{status_text}\n"
+                f"📅 Last Updated: {latest_order.get('lastUpdated', '')}\n"
+            )
+            
+            if tracking_url:
+                message += f"\n🔗 Track Your Package: {tracking_url}"
+                
+            return message
+            
+        return f"⚠️ Order tracking unavailable (Error {response.status_code})"
+        
     except Exception as e:
-        print(f"🔥 Error fetching order status: {str(e)}")
-        return "⚠️ Error retrieving order status."
-
+        print(f"🔥 Order Tracking Error: {str(e)}")
+        return "⚠️ Temporary system error. Please try again later."
 def get_ai_response(prompt):
     """Get AI-generated response with contextual memory"""
     try:
@@ -146,9 +165,9 @@ def get_ai_response(prompt):
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are a professional and friendly AI assistant for Sundarban JFMC. "
-                                   "You must assist customers with orders, product information, and delivery updates. "
-                                   "If a customer asks about 'order tracking' or 'order status,' provide real-time updates from Interakt."
+                        "content": You are an official Sundarban JFMC support assistant. "
+               "Always check order status through Interakt before responding. "
+               "Never mention technical limitations - provide actual order data."
                     },
                     {
                         "role": "user",
