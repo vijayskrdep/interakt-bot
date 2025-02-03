@@ -64,10 +64,11 @@ def get_order_status(phone_number):
                 tracking_url = latest_order.get("tracking_url", "Not Available")
                 
                 return (
-                    f"📦 *Order Update:*
-"
-                    f"🗂 Status: {status}\n"
-                    f"📃 Tracking: {tracking_url if tracking_url else 'Tracking details not available'}\n"
+                    f"📦 *Order Update:*\n"
+                    f"🚚 Current Status: {order_status}\n"
+                    f"🛒 Order ID: {order_id}\n"
+                    f"🔗 Track your order: {tracking_link}"
+
                     "Thank you for shopping with us!"
                 )
             else:
