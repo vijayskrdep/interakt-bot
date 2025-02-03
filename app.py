@@ -43,7 +43,7 @@ def get_product_catalog():
         return "⚠️ Error retrieving product catalog."
 
 def get_order_status(phone_number):
-    """Fetch latest order status for a customer from Interakt"""
+    """Fetch the latest order status from Interakt"""
     try:
         response = requests.get(
             "https://api.interakt.ai/v1/public/cart/orders",
@@ -54,27 +54,26 @@ def get_order_status(phone_number):
             params={"phone_number": phone_number}
         )
 
-        print(f"\n📡 Interakt Order Status API Response: {response.status_code} - {response.text}")
+        print(f"📡 Interakt Order API Response: {response.status_code} - {response.text}")
 
         if response.status_code == 200:
             orders = response.json().get("data", [])
             if orders:
-                latest_order = orders[-1]  # Get the most recent order
-                status = latest_order.get("order_status", "Unknown")
-                tracking_url = latest_order.get("tracking_url", "Not Available")
-                
+                latest_order = orders[-1]  # Fetch the most recent order
+                order_id = latest_order.get("id")
+                order_status = latest_order.get("order_status", "Unknown")
+                tracking_link = latest_order.get("tracking_link", "No tracking link available.")
+
                 return (
                     f"📦 *Order Update:*\n"
                     f"🚚 Current Status: {order_status}\n"
                     f"🛒 Order ID: {order_id}\n"
                     f"🔗 Track your order: {tracking_link}"
-
-                    "Thank you for shopping with us!"
                 )
             else:
-                return "⚠️ No recent orders found."
+                return "⚠️ No orders found under this phone number."
         else:
-            return "⚠️ Unable to fetch order status. Try again later."
+            return f"⚠️ Unable to fetch order details. API Error: {response.status_code}"
     except Exception as e:
         print(f"🔥 Error fetching order status: {str(e)}")
         return "⚠️ Error retrieving order status."
@@ -91,8 +90,16 @@ def get_ai_response(prompt):
             json={
                 "model": "gpt-4-turbo",
                 "messages": [
-                    {"role": "system", "content": "You are a professional customer assistant for Sundarban JFMC. You handle inquiries about honey, ghee, orders, payment, and delivery tracking."},
-                    {"role": "user", "content": prompt}
+                    {
+                        "role": "system",
+                        "content": "You are a professional and friendly AI assistant for Sundarban JFMC. "
+                                   "You must assist customers with orders, product information, and delivery updates. "
+                                   "If a customer asks about 'order tracking' or 'order status,' provide real-time updates from Interakt."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
                 ]
             }
         )
@@ -112,7 +119,9 @@ def handle_interakt_webhook():
         if not data or "type" not in data or "data" not in data:
             return jsonify({"status": "error", "message": "Invalid JSON format"}), 400
 
-        event_type = data.get("type")
+        if data.get("type") != "message_received":
+            return jsonify({"status": "ignored", "message": "Non-message event ignored"}), 200
+
         customer_data = data.get("data", {}).get("customer", {})
         phone_number = customer_data.get("country_code", "") + customer_data.get("phone_number", "")
         message_data = data.get("data", {}).get("message", {})
@@ -120,28 +129,34 @@ def handle_interakt_webhook():
 
         print(f"📩 Received Message: {message_text} from {phone_number}")
 
-        if event_type == "message_received":
-            if "track order" in message_text or "delivery status" in message_text:
-                ai_response = get_order_status(phone_number)
-            else:
-                ai_response = get_ai_response(message_text)
-        elif event_type in ["order_shipped", "order_out_for_delivery", "order_delivered"]:
+        if not phone_number or not message_text:
+            return jsonify({"status": "error", "message": "Missing phone number or message"}), 400
+
+        if "track" in message_text or "order status" in message_text:
             ai_response = get_order_status(phone_number)
         else:
-            return jsonify({"status": "ignored", "message": "Event ignored"}), 200
+            ai_response = get_ai_response(message_text)
 
         response = requests.post(
             "https://api.interakt.ai/v1/public/message/",
-            headers={"Authorization": f"Basic {INTERAKT_API_KEY}", "Content-Type": "application/json"},
-            json={"fullPhoneNumber": phone_number, "type": "Text", "data": {"message": ai_response}}
+            headers={
+                "Authorization": f"Basic {INTERAKT_API_KEY}",
+                "Content-Type": "application/json"
+            },
+            json={
+                "fullPhoneNumber": phone_number,
+                "type": "Text",
+                "data": {"message": ai_response}
+            }
         )
 
         print(f"📡 Interakt Response: {response.status_code} - {response.text}")
 
         return jsonify({"status": "success", "message": "Message sent"}), 200
+
     except Exception as e:
-        print(f"🔥 Critical error: {str(e)}")
-        return jsonify({"status": "error", "message": "Internal server error"}), 500
+        print(f"🔥 Critical error: {str(e)}", flush=True)
+        return jsonify({"status": "error", "message": f"Internal server error: {str(e)}"}), 500
 
 if __name__ == '__main__':
     print(f"\n🚀 Starting WhatsApp AI Assistant on port {PORT}...")
